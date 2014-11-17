@@ -6,5 +6,4 @@
 .DS_Store
 /.prefs
 /src/META-INF/MANIFEST.MF
-/lib
 /pom.xml.versionsBackup
