@@ -14,9 +14,7 @@ Require-Bundle: org.eclipse.ui;bundle-version="3.105.0",
 Bundle-ActivationPolicy: lazy
 Bundle-RequiredExecutionEnvironment: JavaSE-1.7
 Bundle-ClassPath: .,
- lib/org.spotter.client-1.0.1-SNAPSHOT-shaded.jar,
- lib/org.spotter.client-1.0.1-SNAPSHOT-sources.jar,
- lib/org.spotter.client-1.0.1-SNAPSHOT.jar
+ lib/org.spotter.client.assembly.jar
 Import-Package: org.eclipse.core.resources
 Export-Package: org.lpe.common.util,
  org.slf4j,
