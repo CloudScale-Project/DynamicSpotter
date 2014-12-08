@@ -197,7 +197,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		updateView();
 	}
 
-	private void updateView() {
+	protected void updateView() {
 		if (isDisposed) {
 			return;
 		}
@@ -224,7 +224,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		});
 	}
 
-	private void updateContent(IProject project) {
+	public void updateContent(IProject project) {
 		final String projectName = project.getName();
 		ServiceClientWrapper client = Activator.getDefault().getClient(projectName);
 		boolean hasClientConnection = client.testConnection(false);
