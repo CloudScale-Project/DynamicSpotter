@@ -187,11 +187,6 @@ public class ActiveRunView extends ViewPart {
 		this.isDisposed = true;
 	}
 
-	@Override
-	public void selectionChanged(SelectionChangedEvent event) {
-		updateView();
-	}
-
 	protected void updateView() {
 		if (isDisposed) {
 			return;
