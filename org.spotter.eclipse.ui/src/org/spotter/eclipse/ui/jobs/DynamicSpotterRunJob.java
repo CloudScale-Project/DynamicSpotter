@@ -39,7 +39,6 @@ import org.spotter.eclipse.ui.navigator.SpotterProjectResults;
 import org.spotter.eclipse.ui.navigator.SpotterProjectRunResult;
 import org.spotter.eclipse.ui.util.DialogUtils;
 import org.spotter.shared.status.DiagnosisProgress;
-import org.spotter.shared.status.DiagnosisStatus;
 import org.spotter.shared.status.SpotterProgress;
 
 /**
@@ -224,8 +223,17 @@ public class DynamicSpotterRunJob extends Job {
 		}
 
 		String estimates = ": ";
-		if (!diagProgress.getStatus().equals(DiagnosisStatus.PENDING)) {
+
+		switch (diagProgress.getStatus()) {
+		case PENDING:
+			break;
+		case DETECTED:
+		case NOT_DETECTED:
+			estimates = " (100.0 %, 0s remaining): ";
+			break;
+		default:
 			estimates = " (" + estimation + " %, " + duration + "s remaining): ";
+			break;
 		}
 
 		String progressString = problemName + estimates + diagProgress.getStatus();
@@ -273,21 +281,18 @@ public class DynamicSpotterRunJob extends Job {
 		display.asyncExec(new Runnable() {
 			@Override
 			public void run() {
-				if (runException == null) {
-					Map<String, SpotterProjectResults> results = activator.getProjectHistoryElements();
-					SpotterProjectResults projectResultsNode = results.get(project.getName());
-					projectResultsNode.refreshChildren();
-					CommonViewer viewer = activator.getNavigatorViewer();
-					if (!viewer.isBusy()) {
-						viewer.refresh(projectResultsNode);
-						viewer.expandToLevel(projectResultsNode, 1);
-					}
-					DialogUtils.openAsyncInformation(RunHandler.DIALOG_TITLE, MSG_RUN_FINISH);
-					revealResults();
-				} else {
-					// remove the job id because the job failed
-					JobsContainer.removeJobId(project, jobId);
+				Map<String, SpotterProjectResults> results = activator.getProjectHistoryElements();
+				SpotterProjectResults projectResultsNode = results.get(project.getName());
+				projectResultsNode.refreshChildren();
+				CommonViewer viewer = activator.getNavigatorViewer();
+				if (!viewer.isBusy()) {
+					viewer.refresh(projectResultsNode);
+					viewer.expandToLevel(projectResultsNode, 1);
+				}
 
+				if (runException == null) {
+					DialogUtils.openAsyncInformation(RunHandler.DIALOG_TITLE, MSG_RUN_FINISH);
+				} else {
 					String exceptionMsg = runException.getLocalizedMessage();
 					if (exceptionMsg == null || exceptionMsg.isEmpty()) {
 						exceptionMsg = runException.getClass().getSimpleName();
@@ -295,6 +300,8 @@ public class DynamicSpotterRunJob extends Job {
 					String msg = DialogUtils.appendCause(MSG_RUN_ERROR, exceptionMsg, true);
 					DialogUtils.openWarning(RunHandler.DIALOG_TITLE, msg);
 				}
+
+				revealResults();
 			}
 		});
 	}

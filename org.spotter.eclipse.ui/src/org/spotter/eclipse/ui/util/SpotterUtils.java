@@ -15,6 +15,8 @@
  */
 package org.spotter.eclipse.ui.util;
 
+import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -23,11 +25,13 @@ import java.util.List;
 import javax.xml.bind.JAXBException;
 
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
+import org.lpe.common.util.LpeFileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spotter.eclipse.ui.Activator;
@@ -41,6 +45,8 @@ import org.spotter.eclipse.ui.menu.IOpenable;
 import org.spotter.eclipse.ui.navigator.ISpotterProjectElement;
 import org.spotter.eclipse.ui.navigator.SpotterProjectParent;
 import org.spotter.shared.environment.model.XMConfiguration;
+import org.spotter.shared.result.ResultsLocationConstants;
+import org.spotter.shared.result.model.ResultsContainer;
 import org.spotter.shared.util.JAXBUtil;
 
 /**
@@ -53,7 +59,7 @@ public final class SpotterUtils {
 
 	private static final String ERR_MSG_OPEN = "Error while opening element '%s'!";
 	private static final String ERR_MSG_DUPLICATE = "Error while duplicating element '%s'!";
-	private static final String ERR_MSG_DELETE = "Error while deleting element '%s'!";
+	private static final String ERR_MSG_DELETE = "Error while deleting!";
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(SpotterUtils.class);
 
@@ -89,6 +95,71 @@ public final class SpotterUtils {
 	}
 
 	/**
+	 * Reads the results container within the given result folder. In case of
+	 * failure <code>null</code> will be returned.
+	 * 
+	 * @param resultFolder
+	 *            the result folder to read from
+	 * @return the read container or <code>null</code>
+	 */
+	public static ResultsContainer readResultsContainer(IFolder resultFolder) {
+		IFile resFile = resultFolder.getFile(ResultsLocationConstants.RESULTS_SERIALIZATION_FILE_NAME);
+		ResultsContainer resultsContainer = null;
+		File containerFile = new File(resFile.getLocation().toString());
+		if (containerFile.exists()) {
+			try {
+				resultsContainer = (ResultsContainer) LpeFileUtils.readObject(containerFile);
+			} catch (ClassNotFoundException | IOException e) {
+				LOGGER.debug("Cannot read results container " + containerFile);
+			}
+		}
+		return resultsContainer;
+	}
+
+	/**
+	 * Writes the container to the given result folder.
+	 * 
+	 * @param resultFolder
+	 *            the result folder to write to
+	 * @param container
+	 *            the container to be written
+	 * @return <code>true</code> on success, <code>false</code> otherwise
+	 */
+	public static boolean writeResultsContainer(IFolder resultFolder, ResultsContainer container) {
+		IFile resFile = resultFolder.getFile(ResultsLocationConstants.RESULTS_SERIALIZATION_FILE_NAME);
+		File containerFile = new File(resFile.getLocation().toString());
+		try {
+			LpeFileUtils.writeObject(containerFile.getAbsolutePath(), container);
+		} catch (IOException e) {
+			String message = "Error while writing results container!";
+			LOGGER.error(message, e);
+			DialogUtils.handleError(message, e);
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Copies the configuration list.
+	 * 
+	 * @param config
+	 *            the list to copy
+	 * @return a deep copy of the list
+	 */
+	public static List<XMConfiguration> copyConfigurationList(List<XMConfiguration> config) {
+		List<XMConfiguration> configCopy = new ArrayList<>();
+		if (config != null) {
+			for (XMConfiguration xmConfig : config) {
+				XMConfiguration xmConfigCopy = new XMConfiguration();
+				xmConfigCopy.setKey(xmConfig.getKey());
+				xmConfigCopy.setValue(xmConfig.getValue());
+				configCopy.add(xmConfigCopy);
+			}
+		}
+		return configCopy;
+	}
+
+	/**
 	 * Checks whether the given list of config parameters contains the key.
 	 * 
 	 * @param config
@@ -110,6 +181,31 @@ public final class SpotterUtils {
 	}
 
 	/**
+	 * Returns the first element in the given selection matching the parameter
+	 * or <code>null</code> if none available.
+	 * 
+	 * @param <T>
+	 *            element type
+	 * @param selection
+	 *            the selection to extract from
+	 * @param clazz
+	 *            the class of the expected element
+	 * @return the first element or <code>null</code>
+	 */
+	@SuppressWarnings("unchecked")
+	public static <T> T extractFirstElement(ISelection selection, Class<T> clazz) {
+		T result = null;
+		if (selection != null && !selection.isEmpty() && selection instanceof IStructuredSelection) {
+			Object element = ((IStructuredSelection) selection).getFirstElement();
+			if (clazz.isInstance(element)) {
+				result = (T) element;
+			}
+		}
+
+		return result;
+	}
+
+	/**
 	 * Extracts the config parameter with the given key.
 	 * 
 	 * @param config
@@ -120,7 +216,7 @@ public final class SpotterUtils {
 	 *         found
 	 */
 	public static String extractConfigValue(List<XMConfiguration> config, String key) {
-		if (config != null) {
+		if (config != null && key != null) {
 			for (XMConfiguration xmConfig : config) {
 				if (key.equals(xmConfig.getKey())) {
 					return xmConfig.getValue();
@@ -267,24 +363,32 @@ public final class SpotterUtils {
 	}
 
 	/**
-	 * Calls the <code>delete()</code> method on the given element's delete
-	 * handler if it has one.
+	 * Calls the delete method on the given element's delete handler if it has
+	 * one. Expects elements of the same type.
 	 * 
-	 * @param element
-	 *            the element to delete
+	 * @param elements
+	 *            the elements to delete
 	 */
-	public static void deleteElement(Object element) {
-		IHandlerMediator mediator = toHandlerMediator(element);
+	public static void deleteElements(Object[] elements) {
+		if (elements == null || elements.length == 0) {
+			return;
+		}
+		IHandlerMediator mediator = toHandlerMediator(elements[0]);
 		if (mediator != null) {
 			Object handler = mediator.getHandler(DeleteHandler.DELETE_COMMAND_ID);
 			if (handler instanceof IDeletable) {
 				IDeletable deletable = (IDeletable) handler;
-				try {
-					deletable.delete();
-				} catch (Exception e) {
-					String message = String.format(ERR_MSG_DELETE, deletable.toString());
-					LOGGER.error(message, e);
-					DialogUtils.handleError(message, e);
+				if (deletable.showConfirmationDialog(elements)) {
+					try {
+						if (elements.length == 1) {
+							deletable.delete();
+						} else {
+							deletable.delete(elements);
+						}
+					} catch (CoreException e) {
+						LOGGER.error(ERR_MSG_DELETE, e);
+						DialogUtils.handleError(ERR_MSG_DELETE, e);
+					}
 				}
 			}
 		}

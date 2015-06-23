@@ -15,16 +15,21 @@
  */
 package org.spotter.eclipse.ui.navigator;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.ui.IWorkbenchPage;
-import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.editors.text.EditorsUI;
+import org.eclipse.ui.part.FileEditorInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spotter.eclipse.ui.Activator;
@@ -34,7 +39,10 @@ import org.spotter.eclipse.ui.jobs.JobsContainer;
 import org.spotter.eclipse.ui.menu.IDeletable;
 import org.spotter.eclipse.ui.menu.IOpenable;
 import org.spotter.eclipse.ui.util.DialogUtils;
+import org.spotter.eclipse.ui.util.SpotterUtils;
 import org.spotter.eclipse.ui.view.ResultsView;
+import org.spotter.shared.result.ResultsLocationConstants;
+import org.spotter.shared.result.model.ResultsContainer;
 
 /**
  * An element that represents a run result node.
@@ -45,17 +53,24 @@ import org.spotter.eclipse.ui.view.ResultsView;
 public class SpotterProjectRunResult extends AbstractProjectElement {
 
 	public static final String IMAGE_PATH = "icons/results.gif"; //$NON-NLS-1$
+	public static final String ERROR_IMAGE_PATH = "icons/exclamation.png"; //$NON-NLS-1$
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(SpotterProjectRunResult.class);
 
 	private static final String ELEMENT_TYPE_NAME = "Result Item";
 	private static final String OPEN_ID = ResultsView.VIEW_ID;
+	private static final String TXT_OPEN_ID = EditorsUI.DEFAULT_TEXT_EDITOR_ID;
+
+	private static final String MSG_SINGLE = "Are you sure you want to delete the result '%s'?";
+	private static final String MSG_MULTI = "Are you sure you want to delete these %d elements?";
 
 	private final ISpotterProjectElement parent;
 	private final IFolder resultFolder;
+	private boolean isErroneous;
 	private final long jobId;
 	private final long timestamp;
 	private final String elementName;
+	private String elementLabel;
 
 	/**
 	 * Creates a new instance of this element.
@@ -70,18 +85,36 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 	 *            the result folder that is represented by this node
 	 */
 	public SpotterProjectRunResult(ISpotterProjectElement parent, long jobId, long timestamp, IFolder resultFolder) {
-		super(IMAGE_PATH);
+		super();
+
 		this.parent = parent;
 		this.jobId = jobId;
 		this.timestamp = timestamp;
 
+		this.resultFolder = resultFolder;
+		String errorFilePath = resultFolder.getFile(ResultsLocationConstants.TXT_DIAGNOSIS_ERROR_FILE_NAME)
+				.getLocation().toString();
+		this.isErroneous = new File(errorFilePath).exists();
+		if (isErroneous) {
+			setImagePath(ERROR_IMAGE_PATH);
+		} else {
+			setImagePath(IMAGE_PATH);
+		}
+
 		SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd (HH:mm:ss)");
 		this.elementName = dateFormat.format(new Date(timestamp));
-
-		this.resultFolder = resultFolder;
+		readElementLabel();
 
 		addOpenHandler();
 		addDeleteHandler();
+	}
+
+	/**
+	 * @return <code>true</code> if erroneous diagnosis, otherwise
+	 *         <code>false</code>
+	 */
+	public boolean isErroneous() {
+		return isErroneous;
 	}
 
 	private void addOpenHandler() {
@@ -93,7 +126,7 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 
 			@Override
 			public String getOpenId() {
-				return OPEN_ID;
+				return SpotterProjectRunResult.this.getOpenId();
 			}
 
 			@Override
@@ -114,12 +147,26 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 			public void delete() {
 				SpotterProjectRunResult.this.delete();
 			}
+
+			@Override
+			public void delete(Object[] elements) throws CoreException {
+				SpotterProjectRunResult.this.delete(elements);
+			}
+
+			@Override
+			public boolean showConfirmationDialog(Object[] elements) {
+				return SpotterProjectRunResult.this.showConfirmationDialog(elements);
+			}
 		});
 	}
 
 	@Override
 	public String getText() {
-		return elementName;
+		if (elementLabel != null && !elementLabel.isEmpty()) {
+			return elementName + " " + elementLabel;
+		} else {
+			return elementName;
+		}
 	}
 
 	/**
@@ -146,13 +193,65 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 		return parent.getProject();
 	}
 
+	/**
+	 * Updates the label. This also updates the corresponding results container.
+	 * 
+	 * @param label
+	 *            the new label
+	 */
+	public synchronized void updateElementLabel(String label) {
+		ResultsContainer container = SpotterUtils.readResultsContainer(resultFolder);
+		if (container != null) {
+			String oldLabel = container.getLabel();
+			container.setLabel(label);
+			if (SpotterUtils.writeResultsContainer(resultFolder, container)) {
+				this.elementLabel = label;
+			} else {
+				container.setLabel(oldLabel);
+			}
+		}
+	}
+
+	/**
+	 * @return the label of this element if any
+	 */
+	public String getElementLabel() {
+		return elementLabel;
+	}
+
+	/**
+	 * Reads the corresponding container and updates the label.
+	 */
+	private void readElementLabel() {
+		ResultsContainer container = SpotterUtils.readResultsContainer(resultFolder);
+		String label = null;
+		if (container != null) {
+			label = container.getLabel();
+		}
+		this.elementLabel = label;
+	}
+
+	private String getOpenId() {
+		return isErroneous ? TXT_OPEN_ID : OPEN_ID;
+	}
+
 	private void open() {
 		IWorkbenchPage page = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage();
 		try {
-			ResultsView view = (ResultsView) page.showView(OPEN_ID);
-			view.setResult(this);
-		} catch (PartInitException e) {
-			throw new RuntimeException("Could not show view " + OPEN_ID, e);
+			if (isErroneous) {
+				if (!resultFolder.isSynchronized(IResource.DEPTH_INFINITE)) {
+					resultFolder.refreshLocal(IResource.DEPTH_INFINITE, null);
+				}
+				IFile file = resultFolder.getFile(ResultsLocationConstants.TXT_DIAGNOSIS_ERROR_FILE_NAME);
+				page.openEditor(new FileEditorInput(file), getOpenId());
+			} else {
+				ResultsView view = (ResultsView) page.showView(getOpenId());
+				view.setResult(this);
+			}
+		} catch (CoreException e) {
+			String message = "Could not open view part " + getOpenId();
+			LOGGER.error(message, e);
+			throw new RuntimeException(message, e);
 		}
 	}
 
@@ -176,6 +275,18 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 		return result;
 	}
 
+	private boolean showConfirmationDialog(Object[] elements) {
+		String prompt;
+		if (elements.length > 1) {
+			prompt = createMultiMessage(elements.length);
+		} else {
+			prompt = createSingleMessage();
+		}
+
+		boolean confirm = DialogUtils.openConfirm(IDeletable.DELETE_DLG_TITLE, prompt);
+		return confirm;
+	}
+
 	private void delete() {
 		try {
 			if (!resultFolder.isSynchronized(IResource.DEPTH_INFINITE)) {
@@ -189,15 +300,58 @@ public class SpotterProjectRunResult extends AbstractProjectElement {
 				DialogUtils
 						.openError("There was an error while updating the project's job ids. The results of the corresponding id will be fetched again.");
 			}
-			// update navigator viewer
-			SpotterProjectResults parent = (SpotterProjectResults) getParent();
-			parent.refreshChildren();
-			Activator.getDefault().getNavigatorViewer().refresh(parent);
+
+			updateNavigatorViewer();
 		} catch (CoreException e) {
 			String message = "Error while deleting result folder '" + resultFolder.getName() + "'!";
 			LOGGER.error(message, e);
 			DialogUtils.handleError(message, e);
 		}
+	}
+
+	private void singleDelete(SpotterProjectRunResult runResult, List<Long> jobIds) {
+		IFolder resultFolder = runResult.getResultFolder();
+		try {
+			if (!resultFolder.isSynchronized(IResource.DEPTH_INFINITE)) {
+				resultFolder.refreshLocal(IResource.DEPTH_INFINITE, null);
+			}
+
+			ResultsView.reset(resultFolder);
+			resultFolder.delete(true, null);
+			jobIds.add(runResult.jobId);
+		} catch (CoreException e) {
+			String message = "Error while deleting result folder '" + resultFolder.getName() + "'!";
+			LOGGER.error(message, e);
+			DialogUtils.handleError(message, e);
+		}
+	}
+
+	private void delete(Object[] elements) {
+		List<Long> jobIds = new ArrayList<>();
+		for (Object element : elements) {
+			SpotterProjectRunResult runResult = (SpotterProjectRunResult) element;
+			singleDelete(runResult, jobIds);
+		}
+
+		if (!JobsContainer.removeJobIds(getProject(), jobIds)) {
+			DialogUtils
+					.openError("There was an error while updating the project's job ids. The results of the corresponding ids will be fetched again.");
+		}
+		updateNavigatorViewer();
+	}
+
+	private void updateNavigatorViewer() {
+		SpotterProjectResults parent = (SpotterProjectResults) getParent();
+		parent.refreshChildren();
+		Activator.getDefault().getNavigatorViewer().refresh(parent);
+	}
+
+	private String createSingleMessage() {
+		return String.format(MSG_SINGLE, getText());
+	}
+
+	private String createMultiMessage(int count) {
+		return String.format(MSG_MULTI, count);
 	}
 
 }

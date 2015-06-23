@@ -19,9 +19,10 @@ import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Collections;
+import java.io.PrintWriter;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -127,6 +128,7 @@ public class SpotterServiceWrapper {
 					currentJobState = JobState.FINISHED;
 				} catch (Throwable e) {
 					LOGGER.error("Diagnosis failed!", e);
+					writeDiagnosisErrorFile(Spotter.getInstance().getDiagnosisResultFolder(), e);
 					currentJobState = JobState.CANCELLED;
 					throw new RuntimeException(e);
 				} finally {
@@ -268,7 +270,7 @@ public class SpotterServiceWrapper {
 	public Set<ConfigParameterDescription> getExtensionConfigParamters(String extName) {
 		IExtension<? extends IExtensionArtifact> extension = ExtensionRegistry.getSingleton().getExtension(extName);
 		if (extension == null) {
-			return Collections.emptySet();
+			return null;
 		}
 		return extension.getConfigParameters();
 	}
@@ -334,6 +336,26 @@ public class SpotterServiceWrapper {
 		}
 
 		return configurationFile;
+	}
+
+	private void writeDiagnosisErrorFile(String folder, Throwable throwable) {
+		String errorFile = folder + ResultsLocationConstants.TXT_DIAGNOSIS_ERROR_FILE_NAME;
+		PrintWriter pw = null;
+		try {
+			pw = new PrintWriter(new FileWriter(errorFile));
+			pw.println("Diagnosis failed!");
+			pw.println();
+			if (throwable.getMessage() != null && !throwable.getMessage().isEmpty()) {
+				pw.println(throwable.getMessage());
+			}
+			throwable.printStackTrace(pw);
+		} catch (IOException e) {
+			LOGGER.warn("Problem occurred while creating error file!", e);
+		} finally {
+			if (pw != null) {
+				pw.close();
+			}
+		}
 	}
 
 	private static String getRuntimeLocation() {

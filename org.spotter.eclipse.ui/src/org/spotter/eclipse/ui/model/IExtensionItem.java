@@ -53,6 +53,11 @@ public interface IExtensionItem extends IHandlerMediator {
 	Image getImage();
 
 	/**
+	 * @return the id of the editor this extension is assigned to
+	 */
+	String getEditorId();
+
+	/**
 	 * @return whether the connection of this item is irrelevant and is ignored
 	 */
 	boolean isConnectionIgnored();
@@ -146,8 +151,20 @@ public interface IExtensionItem extends IHandlerMediator {
 
 	/**
 	 * Must be called when this item is removed.
+	 * 
+	 * @param propagate
+	 *            whether to propagate the call to its children
 	 */
-	void removed();
+	void removed(boolean propagate);
+
+	/**
+	 * Returns a deep copy of this item including its children. If this item
+	 * contained any unique keys, the copy will have new keys assigned instead
+	 * to ensure that all keys remain unique.
+	 * 
+	 * @return a copy of this item
+	 */
+	IExtensionItem copyItem();
 
 	/**
 	 * Returns a specific item determined by its index.
@@ -177,20 +194,48 @@ public interface IExtensionItem extends IHandlerMediator {
 	void addItem(IExtensionItem item);
 
 	/**
+	 * Adds a new child item at the given position. The added item will have
+	 * this item as parent and inherits settings like
+	 * <code>isConnectionIgnored()</code>. The current item at that position and
+	 * consecutive items will be moved back one place.
+	 * 
+	 * @param index
+	 *            the index of the new item
+	 * @param item
+	 *            the item to add
+	 */
+	void addItem(int index, IExtensionItem item);
+
+	/**
+	 * Moves the given child item to the destination position.
+	 * 
+	 * @param item
+	 *            the item to move
+	 * @param destinationIndex
+	 *            the index the item should be moved to
+	 * @return <code>true</code> on success, <code>false</code> otherwise
+	 */
+	boolean moveItem(IExtensionItem item, int destinationIndex);
+
+	/**
 	 * Removes a child item at the given position.
 	 * 
 	 * @param index
 	 *            the index of the child to remove
+	 * @param propagate
+	 *            whether to propagate the call to its children
 	 */
-	void removeItem(int index);
+	void removeItem(int index, boolean propagate);
 
 	/**
 	 * Removes the given child item.
 	 * 
 	 * @param item
 	 *            the child item to remove
+	 * @param propagate
+	 *            whether to propagate the call to its children
 	 */
-	void removeItem(IExtensionItem item);
+	void removeItem(IExtensionItem item, boolean propagate);
 
 	/**
 	 * @return the children items of this item
@@ -220,6 +265,17 @@ public interface IExtensionItem extends IHandlerMediator {
 	 * @return the parent item or <code>null</code> if this item is the root
 	 */
 	IExtensionItem getParent();
+
+	/**
+	 * Returns <code>true</code> if this item has the given item somewhere up
+	 * the hierarchy.
+	 * 
+	 * @param parent
+	 *            the parent to look for
+	 * @return <code>true</code> if this item has the given item somewhere up
+	 *         the hierarchy, <code>false</code> otherwise
+	 */
+	boolean hasParent(IExtensionItem parent);
 
 	/**
 	 * Sets an error for this item with the given message. May not be

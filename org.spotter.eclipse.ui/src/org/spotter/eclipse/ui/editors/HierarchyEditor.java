@@ -16,6 +16,7 @@
 package org.spotter.eclipse.ui.editors;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.runtime.IProgressMonitor;
@@ -65,6 +66,11 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 	}
 
 	@Override
+	public String getEditorId() {
+		return ID;
+	}
+
+	@Override
 	public void doSave(IProgressMonitor monitor) {
 		try {
 			HierarchyEditorInput input = (HierarchyEditorInput) getEditorInput();
@@ -83,7 +89,7 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 		}
 
 		String projectName = getProject().getName();
-		IExtensionItemFactory factory = new BasicEditorExtensionItemFactory();
+		IExtensionItemFactory factory = new BasicEditorExtensionItemFactory(getEditorId());
 		return createPerformanceProblemHierarchy(projectName, factory, problemRoot);
 	}
 
@@ -108,7 +114,6 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 		if (container.getProblem() == null) {
 			container.setProblem(new ArrayList<XPerformanceProblem>());
 		}
-		container.getProblem().add(problem);
 		return new HierarchyModelWrapper(extensionComponent, container.getProblem(), problem);
 	}
 
@@ -152,9 +157,10 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 			rootProblem.setProblem(new ArrayList<XPerformanceProblem>());
 		}
 		ServiceClientWrapper client = Activator.getDefault().getClient(projectName);
-		for (XPerformanceProblem problem : rootProblem.getProblem()) {
+		Iterator<XPerformanceProblem> problemIter = rootProblem.getProblem().iterator();
+		while (problemIter.hasNext()) {
 			try {
-				buildRecursiveTree(client, factory, input, rootProblem, problem);
+				buildRecursiveTree(client, factory, input, rootProblem, problemIter);
 			} catch (UICoreException e) {
 				String message = "Creating performance problem hierarchy failed.";
 				LOGGER.warn(message, e);
@@ -166,12 +172,18 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 	}
 
 	private static void buildRecursiveTree(ServiceClientWrapper client, IExtensionItemFactory factory,
-			IExtensionItem parent, XPerformanceProblem parentProblem, XPerformanceProblem problem)
+			IExtensionItem parent, XPerformanceProblem parentProblem, Iterator<XPerformanceProblem> problemIter)
 			throws UICoreException {
+		XPerformanceProblem problem = problemIter.next();
 		String extName = problem.getExtensionName();
 
 		if (client.getExtensionConfigParamters(extName) == null) {
-			throw new UICoreException("Could not fully initialize ExtensionItem");
+			DialogUtils.openWarning(TITLE_CONFIG_ERR_DIALOG, "Skipping extension item '" + extName
+					+ "' because the given extension does not exist! In order to "
+					+ "recover its configuration you may manually rename the extension "
+					+ "in the config file before saving it, otherwise the data will be lost.");
+			problemIter.remove();
+			return;
 		}
 
 		String projectName = client.getProjectName();
@@ -180,8 +192,9 @@ public class HierarchyEditor extends AbstractExtensionsEditor {
 		IExtensionItem child = factory.createExtensionItem(wrapper);
 		parent.addItem(child);
 		if (problem.getProblem() != null) {
-			for (XPerformanceProblem childProblem : problem.getProblem()) {
-				buildRecursiveTree(client, factory, child, problem, childProblem);
+			Iterator<XPerformanceProblem> childIter = problem.getProblem().iterator();
+			while (childIter.hasNext()) {
+				buildRecursiveTree(client, factory, child, problem, childIter);
 			}
 		}
 	}

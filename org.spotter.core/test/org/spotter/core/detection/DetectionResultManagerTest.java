@@ -39,7 +39,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.lpe.common.config.GlobalConfiguration;
 import org.lpe.common.util.LpeFileUtils;
+import org.lpe.common.util.NumericPairList;
 import org.lpe.common.util.system.LpeSystemUtils;
+import org.spotter.core.chartbuilder.XChartBuilder;
 import org.spotter.core.test.dummies.satellites.DummyMeasurement;
 import org.spotter.shared.configuration.ConfigKeys;
 import org.spotter.shared.result.ResultsLocationConstants;
@@ -51,13 +53,13 @@ import com.xeiam.xchart.ChartBuilder;
 public class DetectionResultManagerTest {
 	private static final String CONTROLLER_NAME = "testController";
 	private String baseDir = "";
-	private static final String PARENT_DIR = System.getProperty("file.separator") + "parent";
-	private static final String DATA_DIR = System.getProperty("file.separator") + CONTROLLER_NAME + "-" + CONTROLLER_NAME.hashCode()
-			+ System.getProperty("file.separator") + ResultsLocationConstants.CSV_SUB_DIR
+	private static final String PARENT_DIR = "parent";
+	private static final String DATA_DIR = System.getProperty("file.separator") + CONTROLLER_NAME + "-"
+			+ CONTROLLER_NAME.hashCode() + System.getProperty("file.separator") + ResultsLocationConstants.CSV_SUB_DIR
 			+ System.getProperty("file.separator");
-	private static final String RESOURCES_DIR = System.getProperty("file.separator") + CONTROLLER_NAME + "-" + CONTROLLER_NAME.hashCode()
-			+ System.getProperty("file.separator") + ResultsLocationConstants.RESULT_RESOURCES_SUB_DIR
-			+ System.getProperty("file.separator");
+	private static final String RESOURCES_DIR = System.getProperty("file.separator") + CONTROLLER_NAME + "-"
+			+ CONTROLLER_NAME.hashCode() + System.getProperty("file.separator")
+			+ ResultsLocationConstants.RESULT_RESOURCES_SUB_DIR + System.getProperty("file.separator");
 	private File tempDir;
 
 	@BeforeClass
@@ -88,18 +90,23 @@ public class DetectionResultManagerTest {
 				baseDir + System.getProperty("file.separator"));
 		DetectionResultManager drManager = new DetectionResultManager(CONTROLLER_NAME);
 		drManager.setProblemId(CONTROLLER_NAME);
-		drManager.setParentDataDir(baseDir + PARENT_DIR);
+		drManager.setParentIdentifier(PARENT_DIR);
 		Assert.assertEquals(baseDir + DATA_DIR, drManager.getDataPath());
 		Assert.assertEquals(baseDir + DATA_DIR, drManager.getDataPath());
 		Assert.assertEquals(baseDir + RESOURCES_DIR, drManager.getAdditionalResourcesPath());
 		Assert.assertEquals(baseDir + RESOURCES_DIR, drManager.getAdditionalResourcesPath());
 
 		drManager.overwriteDataPath("anotherPath");
-		Assert.assertEquals("anotherPath", drManager.getDataPath());
+		String newPath = "anotherPath" + System.getProperty("file.separator") + CONTROLLER_NAME + "-"
+				+ CONTROLLER_NAME.hashCode() + System.getProperty("file.separator") + "csv"
+				+ System.getProperty("file.separator");
+		Assert.assertEquals(newPath, drManager.getDataPath());
 		Assert.assertEquals(baseDir + RESOURCES_DIR, drManager.getAdditionalResourcesPath());
 
 		drManager.useParentDataDir();
-		Assert.assertEquals(baseDir + PARENT_DIR, drManager.getDataPath());
+		Assert.assertEquals(
+				baseDir + System.getProperty("file.separator") + PARENT_DIR + System.getProperty("file.separator")
+						+ "csv" + System.getProperty("file.separator"), drManager.getDataPath());
 		Assert.assertEquals(baseDir + RESOURCES_DIR, drManager.getAdditionalResourcesPath());
 	}
 
@@ -127,27 +134,26 @@ public class DetectionResultManagerTest {
 
 	@Test
 	public void testChartStorage() throws IOException {
-		ChartBuilder chartBuilder = new ChartBuilder();
-		chartBuilder.width(100);
-		chartBuilder.height(100);
-		chartBuilder.title("title");
-		chartBuilder.xAxisTitle("Experiment time ");
-		chartBuilder.yAxisTitle("y-axis");
-		Chart chart = chartBuilder.build();
-		double[] x = { 1.0, 2.0, 3.0 };
-		double[] y = { 1.0, 2.0, 3.0 };
-		chart.addSeries("Test Series", x, y);
+
+		XChartBuilder chartBuilder = new XChartBuilder();
+		chartBuilder.startChart("a", "b", "c");
+		NumericPairList<Double, Double> pairList = new NumericPairList<>();
+		pairList.add(1.0,2.0);
+		pairList.add(2.0,5.0);
+		pairList.add(3.0,7.0);
+		chartBuilder.addScatterSeries(pairList, "test");
 		DetectionResultManager drManager = new DetectionResultManager(CONTROLLER_NAME);
 		drManager.setProblemId(CONTROLLER_NAME);
 		String fileName = "chart";
 		SpotterResult result = new SpotterResult();
 		result.setDetected(true);
-		drManager.storeImageChartResource(chart, fileName, result);
+		drManager.storeImageChartResource(chartBuilder, fileName, result);
 
 		Assert.assertEquals(1, result.getResourceFiles().size());
-		Assert.assertEquals(fileName + ".png", result.getResourceFiles().get(0));
+		String file = "1-" + fileName + ".png";
+		Assert.assertEquals(file, result.getResourceFiles().get(0));
 
-		File pngFile = new File(baseDir + RESOURCES_DIR + fileName + ".png");
+		File pngFile = new File(baseDir + RESOURCES_DIR + file);
 		Assert.assertTrue(pngFile.isFile());
 		Assert.assertTrue(pngFile.exists());
 	}
@@ -188,9 +194,10 @@ public class DetectionResultManagerTest {
 		drManager.storeTextResource(fileName, result, inStream);
 
 		Assert.assertEquals(1, result.getResourceFiles().size());
-		Assert.assertEquals(fileName + ".txt", result.getResourceFiles().get(0));
+		String file = "1-" + fileName + ".txt";
+		Assert.assertEquals(file, result.getResourceFiles().get(0));
 
-		File txtFile = new File(baseDir + RESOURCES_DIR + fileName + ".txt");
+		File txtFile = new File(baseDir + RESOURCES_DIR + file);
 		Assert.assertTrue(txtFile.isFile());
 		Assert.assertTrue(txtFile.exists());
 	}

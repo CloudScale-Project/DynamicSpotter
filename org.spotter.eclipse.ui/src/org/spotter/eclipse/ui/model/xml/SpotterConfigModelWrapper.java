@@ -24,6 +24,7 @@ import java.util.Set;
 import org.lpe.common.config.ConfigParameterDescription;
 import org.spotter.eclipse.ui.Activator;
 import org.spotter.eclipse.ui.ServiceClientWrapper;
+import org.spotter.eclipse.ui.util.SpotterUtils;
 import org.spotter.shared.environment.model.XMConfiguration;
 
 /**
@@ -37,6 +38,11 @@ public class SpotterConfigModelWrapper implements IModelWrapper {
 
 	private final String projectName;
 	private List<XMConfiguration> xmConfigList;
+
+	// private constructor for copy method
+	private SpotterConfigModelWrapper(String projectName) {
+		this.projectName = projectName;
+	}
 
 	/**
 	 * Creates an instance of this class using the given properties.
@@ -82,6 +88,13 @@ public class SpotterConfigModelWrapper implements IModelWrapper {
 		this.xmConfigList = config;
 	}
 
+	@Override
+	public IModelWrapper copy() {
+		SpotterConfigModelWrapper wrapper = new SpotterConfigModelWrapper(projectName);
+		wrapper.setConfig(SpotterUtils.copyConfigurationList(getConfig()));
+		return wrapper;
+	}
+
 	/**
 	 * The spotter config has no underlying XML model and uses the
 	 * <code>ConfigParameterDescription</code>s of {@link Spotter} directly.
@@ -90,6 +103,16 @@ public class SpotterConfigModelWrapper implements IModelWrapper {
 	 */
 	@Override
 	public Object getXMLModel() {
+		return null;
+	}
+
+	@Override
+	public void setXMLModelContainingList(List<?> modelContainingList) {
+		// nothing to do
+	}
+
+	@Override
+	public List<?> getChildren() {
 		return null;
 	}
 
@@ -111,7 +134,18 @@ public class SpotterConfigModelWrapper implements IModelWrapper {
 	}
 
 	@Override
+	public void added() {
+		// nothing to do
+	}
+
+	@Override
 	public void removed() {
+		// nothing to do
+	}
+
+	@Override
+	public void moved(int destinationIndex) {
+		// nothing to do
 	}
 
 }

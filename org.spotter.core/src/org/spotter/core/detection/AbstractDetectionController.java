@@ -27,6 +27,7 @@ import org.aim.api.measurement.dataset.DatasetCollection;
 import org.aim.api.measurement.dataset.Parameter;
 import org.aim.description.InstrumentationDescription;
 import org.aim.description.builder.InstrumentationDescriptionBuilder;
+import org.lpe.common.config.ConfigParameterDescription;
 import org.lpe.common.config.GlobalConfiguration;
 import org.lpe.common.extension.AbstractExtensionArtifact;
 import org.lpe.common.extension.IExtension;
@@ -55,12 +56,13 @@ import org.spotter.shared.status.DiagnosisStatus;
  */
 public abstract class AbstractDetectionController extends AbstractExtensionArtifact implements IDetectionController {
 	private static final Logger LOGGER = LoggerFactory.getLogger(AbstractDetectionController.class);
-	private static final double EPSILON = 0.5;
+	public static final double EPSILON = 0.5;
 	public static final long SECOND = 1000L;
 
 	private static final int MIN_NUM_USERS = 1;
-	protected static final String NUMBER_OF_USERS_KEY = "numUsers";
-	protected static final String EXPERIMENT_STEPS_KEY = "numExperimentSteps";
+	public static final String NUMBER_OF_USERS_KEY = "numUsers";
+	public static final String EXPERIMENT_STEPS_KEY = "numExperimentSteps";
+	public static boolean sutWarmedUp = false;
 
 	private static int getSUTWarmUpDuration() {
 		return GlobalConfiguration.getInstance().getPropertyAsInteger(ConfigKeys.PREWARUMUP_DURATION,
@@ -75,7 +77,7 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	private final DetectionResultManager resultManager;
 
 	private boolean instrumented = false;
-	private boolean sutWarmedUp = false;
+
 	private Properties problemDetectionConfiguration = new Properties();
 
 	private List<IExperimentReuser> experimentReuser;
@@ -98,21 +100,29 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	@Override
 	public SpotterResult analyzeProblem() throws InstrumentationException, MeasurementException, WorkloadException {
 		try {
-			if (!GlobalConfiguration.getInstance().getPropertyAsBoolean(ConfigKeys.OMIT_WARMUP, false)) {
+			if (!GlobalConfiguration.getInstance().getPropertyAsBoolean(ConfigKeys.OMIT_WARMUP, false) && !sutWarmedUp) {
 
 				ProgressManager.getInstance().addAdditionalDuration(getSUTWarmUpDuration());
 			}
 
 			ProgressManager.getInstance().updateProgressStatus(getProblemId(), DiagnosisStatus.INITIALIZING);
 			ProgressManager.getInstance().setProblemName(getProblemId(), getProvider().getName());
+			boolean reuser = Boolean.parseBoolean(this.getProblemDetectionConfiguration().getProperty(
+					AbstractDetectionExtension.REUSE_EXPERIMENTS_FROM_PARENT, "false"));
+			boolean omitExperiments = GlobalConfiguration.getInstance().getPropertyAsBoolean(
+					ConfigKeys.OMIT_EXPERIMENTS, false);
 
-			if (GlobalConfiguration.getInstance().getPropertyAsBoolean(ConfigKeys.OMIT_EXPERIMENTS, false)) {
+			if (omitExperiments & reuser) {
+				resultManager.useOverwrittenParentDataDir(GlobalConfiguration.getInstance().getProperty(
+						ConfigKeys.DUMMY_EXPERIMENT_DATA));
+			} else if (omitExperiments & !reuser) {
 				resultManager.overwriteDataPath(GlobalConfiguration.getInstance().getProperty(
 						ConfigKeys.DUMMY_EXPERIMENT_DATA));
-			} else if (this instanceof IExperimentReuser) {
+			} else if (!omitExperiments & reuser) {
 				resultManager.useParentDataDir();
-			} else {
-				if (!GlobalConfiguration.getInstance().getPropertyAsBoolean(ConfigKeys.OMIT_WARMUP, false)) {
+			} else if (!omitExperiments & !reuser) {
+				if (!GlobalConfiguration.getInstance().getPropertyAsBoolean(ConfigKeys.OMIT_WARMUP, false)
+						&& !sutWarmedUp) {
 					warmUpSUT();
 				}
 
@@ -159,8 +169,8 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	 * and increases the load from one experiment to the next until the maximum
 	 * number of users is reached.
 	 * 
-	 * @param detectionControllerClass
-	 *            class of the detection controller executing the experiments
+	 * @param detectionController
+	 *            the detection controller executing the experiments
 	 * @param numExperimentSteps
 	 *            number of experiment steps to execute
 	 * @param instDescription
@@ -172,9 +182,9 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	 * @throws WorkloadException
 	 *             if load cannot be generated properly
 	 */
-	protected void executeDefaultExperimentSeries(Class<? extends IDetectionController> detectionControllerClass,
-			int numExperimentSteps, InstrumentationDescription instDescription) throws InstrumentationException,
-			MeasurementException, WorkloadException {
+	protected void executeDefaultExperimentSeries(IDetectionController detectionController, int numExperimentSteps,
+			InstrumentationDescription instDescription) throws InstrumentationException, MeasurementException,
+			WorkloadException {
 
 		instrumentApplication(instDescription);
 
@@ -182,7 +192,7 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 				.getProperties(), ConfigKeys.WORKLOAD_MAXUSERS, null));
 
 		if (numExperimentSteps <= 1) {
-			runExperiment(detectionControllerClass, maxUsers);
+			runExperiment(detectionController, maxUsers);
 		} else {
 			double dMinUsers = MIN_NUM_USERS;
 			double dMaxUsers = maxUsers;
@@ -191,12 +201,12 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 			// if we have the same number of maximum and minimum users, then we
 			// have only one experiment run
 			if (dStep <= 0.0 + EPSILON) {
-				runExperiment(detectionControllerClass, MIN_NUM_USERS);
+				runExperiment(detectionController, MIN_NUM_USERS);
 			} else {
 
 				for (double dUsers = dMinUsers; dUsers <= (dMaxUsers + EPSILON); dUsers += dStep) {
 					int numUsers = new Double(dUsers).intValue();
-					runExperiment(detectionControllerClass, numUsers);
+					runExperiment(detectionController, numUsers);
 				}
 
 			}
@@ -215,18 +225,28 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	 *            instrumentation state of the target application
 	 * @throws InstrumentationException
 	 *             if instrumentation fails
+	 * @throws MeasurementException
+	 *             if instrumentation fails
 	 */
-	protected void instrumentApplication(InstrumentationDescription instDescription) throws InstrumentationException {
+	protected void instrumentApplication(InstrumentationDescription instDescription) throws InstrumentationException,
+			MeasurementException {
 		ProgressManager.getInstance().updateProgressStatus(getProblemId(), DiagnosisStatus.INSTRUMENTING);
 		long instrumentationStart = System.currentTimeMillis();
 
 		InstrumentationDescriptionBuilder descriptionBuilder = new InstrumentationDescriptionBuilder();
+		String excludes = GlobalConfiguration.getInstance().getProperty(ConfigKeys.INSTRUMENTATION_EXCLUDES, "");
+		for (String exc : excludes.split(ConfigParameterDescription.LIST_VALUE_SEPARATOR)) {
+			descriptionBuilder.newGlobalRestriction().excludePackage(exc);
+		}
+
 		descriptionBuilder.appendOtherDescription(instDescription);
 
 		for (IExperimentReuser reuser : experimentReuser) {
 			descriptionBuilder.appendOtherDescription(reuser.getInstrumentationDescription());
 		}
-		getInstrumentationController().instrument(descriptionBuilder.build());
+		InstrumentationDescription aggregatedDescription = descriptionBuilder.build();
+		getInstrumentationController().instrument(aggregatedDescription);
+		measurementController.prepareMonitoring(aggregatedDescription);
 		instrumented = true;
 		ProgressManager.getInstance().addAdditionalDuration(
 				(System.currentTimeMillis() - instrumentationStart) / SECOND);
@@ -238,11 +258,14 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	 * 
 	 * @throws InstrumentationException
 	 *             if reversion fails
+	 * @throws MeasurementException
+	 *             if reversion fails
 	 */
-	protected void uninstrumentApplication() throws InstrumentationException {
+	protected void uninstrumentApplication() throws InstrumentationException, MeasurementException {
 		ProgressManager.getInstance().updateProgressStatus(getProblemId(), DiagnosisStatus.UNINSTRUMENTING);
 		long uninstrumentationStart = System.currentTimeMillis();
 		getInstrumentationController().uninstrument();
+		measurementController.resetMonitoring();
 		instrumented = false;
 		ProgressManager.getInstance().addAdditionalDuration(
 				(System.currentTimeMillis() - uninstrumentationStart) / SECOND);
@@ -251,8 +274,8 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	/**
 	 * Runs a single experiment.
 	 * 
-	 * @param detectionControllerClass
-	 *            class of the detection controller running the analysis
+	 * @param detectionController
+	 *            the detection controller running the analysis
 	 * @param numUsers
 	 *            number of user to use for the load of this experiment
 	 * @throws WorkloadException
@@ -260,10 +283,11 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 	 * @throws MeasurementException
 	 *             if data collection fails
 	 */
-	protected void runExperiment(Class<? extends IDetectionController> detectionControllerClass, int numUsers)
-			throws WorkloadException, MeasurementException {
+	protected void runExperiment(IDetectionController detectionController, int numUsers) throws WorkloadException,
+			MeasurementException {
 
-		LOGGER.info("{} started experiment with {} users ...", detectionControllerClass.getSimpleName(), numUsers);
+		LOGGER.info("{} detection controller started experiment with {} users ...", detectionController.getProvider()
+				.getName(), numUsers);
 		ProgressManager.getInstance().updateProgressStatus(getProblemId(), DiagnosisStatus.EXPERIMENTING_RAMP_UP);
 		LoadConfig lConfig = new LoadConfig();
 		lConfig.setNumUsers(numUsers);
@@ -340,19 +364,6 @@ public abstract class AbstractDetectionController extends AbstractExtensionArtif
 		this.problemId = problemId;
 		resultManager.setProblemId(problemId);
 	}
-
-	/**
-	 * Triggers heuristic specific experiment execution.
-	 * 
-	 * @throws InstrumentationException
-	 *             if instrumentation fails
-	 * @throws MeasurementException
-	 *             if measurement data cannot be collected
-	 * @throws WorkloadException
-	 *             if load cannot be generated properly
-	 */
-	protected abstract void executeExperiments() throws InstrumentationException, MeasurementException,
-			WorkloadException;
 
 	/**
 	 * Analyzes the given measurement data.

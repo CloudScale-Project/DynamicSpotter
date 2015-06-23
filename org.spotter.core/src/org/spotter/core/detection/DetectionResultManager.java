@@ -36,13 +36,14 @@ import org.aim.api.measurement.utils.RecordCSVWriter;
 import org.lpe.common.config.GlobalConfiguration;
 import org.lpe.common.util.LpeFileUtils;
 import org.lpe.common.util.system.LpeSystemUtils;
+import org.spotter.core.chartbuilder.AnalysisChartBuilder;
+import org.spotter.core.chartbuilder.RChartBuilder;
+import org.spotter.core.chartbuilder.XChartBuilder;
 import org.spotter.core.measurement.IMeasurementAdapter;
+import org.spotter.shared.configuration.ConfigCheck;
 import org.spotter.shared.configuration.ConfigKeys;
 import org.spotter.shared.result.ResultsLocationConstants;
 import org.spotter.shared.result.model.SpotterResult;
-
-import com.xeiam.xchart.BitmapEncoder;
-import com.xeiam.xchart.Chart;
 
 /**
  * Manages the storage of results for a detection controller.
@@ -53,10 +54,11 @@ import com.xeiam.xchart.Chart;
 public class DetectionResultManager {
 	private String dataPath;
 	private String resourcePath;
-	private String parentDataDir;
+	private String parentIdentifier;
 	private String controllerName;
 	private String problemId;
 	private int resultCount = 0;
+	private int additionalResourceCount = 0;
 
 	/**
 	 * Constructor.
@@ -74,8 +76,8 @@ public class DetectionResultManager {
 	 * @param readDataFrom
 	 *            directory where to read data from
 	 */
-	public void setParentDataDir(String readDataFrom) {
-		this.parentDataDir = readDataFrom;
+	public void setParentIdentifier(String readDataFrom) {
+		this.parentIdentifier = readDataFrom;
 	}
 
 	/**
@@ -86,11 +88,8 @@ public class DetectionResultManager {
 	public String getDataPath() {
 		StringBuilder pathBuilder = new StringBuilder();
 		if (dataPath == null) {
-			pathBuilder.append(GlobalConfiguration.getInstance().getProperty(
-					ConfigKeys.RESULT_DIR));
-			pathBuilder.append(controllerName);
-			pathBuilder.append("-");
-			pathBuilder.append(getProblemId().hashCode());
+			pathBuilder.append(GlobalConfiguration.getInstance().getProperty(ConfigKeys.RESULT_DIR));
+			pathBuilder.append(getControllerIdentifier());
 			pathBuilder.append(System.getProperty("file.separator"));
 
 			pathBuilder.append(ResultsLocationConstants.CSV_SUB_DIR);
@@ -104,6 +103,21 @@ public class DetectionResultManager {
 	}
 
 	/**
+	 * Returns the directory where raw experiment data is store in.
+	 * 
+	 * @return directory where raw experiment data is store in.
+	 */
+	public String getControllerIdentifier() {
+		StringBuilder pathBuilder = new StringBuilder();
+
+		pathBuilder.append(controllerName);
+		pathBuilder.append("-");
+		pathBuilder.append(getProblemId().hashCode());
+
+		return pathBuilder.toString();
+	}
+
+	/**
 	 * Returns the path for additional resources.
 	 * 
 	 * @return directory where additional resources shall be stored
@@ -111,15 +125,11 @@ public class DetectionResultManager {
 	public String getAdditionalResourcesPath() {
 		StringBuilder pathBuilder = new StringBuilder();
 		if (resourcePath == null) {
-			pathBuilder.append(GlobalConfiguration.getInstance().getProperty(
-					ConfigKeys.RESULT_DIR));
-			pathBuilder.append(controllerName);
-			pathBuilder.append("-");
-			pathBuilder.append(getProblemId().hashCode());
+			pathBuilder.append(GlobalConfiguration.getInstance().getProperty(ConfigKeys.RESULT_DIR));
+			pathBuilder.append(getControllerIdentifier());
 			pathBuilder.append(System.getProperty("file.separator"));
 
-			pathBuilder
-					.append(ResultsLocationConstants.RESULT_RESOURCES_SUB_DIR);
+			pathBuilder.append(ResultsLocationConstants.RESULT_RESOURCES_SUB_DIR);
 			pathBuilder.append(System.getProperty("file.separator"));
 
 			resourcePath = pathBuilder.toString();
@@ -149,39 +159,78 @@ public class DetectionResultManager {
 	 *            data directory to use
 	 */
 	public void overwriteDataPath(String dataDirectory) {
-		dataPath = dataDirectory;
+		StringBuilder pathBuilder = new StringBuilder();
+		String dir = ConfigCheck.correctFileName(dataDirectory, true);
+		pathBuilder.append(dir);
+		pathBuilder.append(getControllerIdentifier());
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		pathBuilder.append(ResultsLocationConstants.CSV_SUB_DIR);
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		dataPath = pathBuilder.toString();
+
 	}
 
 	/**
 	 * Use parent data directory.
 	 */
 	public void useParentDataDir() {
-		dataPath = parentDataDir;
+
+		StringBuilder pathBuilder = new StringBuilder();
+		pathBuilder.append(GlobalConfiguration.getInstance().getProperty(ConfigKeys.RESULT_DIR));
+		pathBuilder.append(parentIdentifier);
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		pathBuilder.append(ResultsLocationConstants.CSV_SUB_DIR);
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		dataPath = pathBuilder.toString();
+	}
+
+	/**
+	 * Use overwritten parent directory.
+	 * 
+	 * @param dataDirectory
+	 *            overwritten directory
+	 */
+	public void useOverwrittenParentDataDir(String dataDirectory) {
+
+		StringBuilder pathBuilder = new StringBuilder();
+		String dir = ConfigCheck.correctFileName(dataDirectory, true);
+		pathBuilder.append(dir);
+		pathBuilder.append(parentIdentifier);
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		pathBuilder.append(ResultsLocationConstants.CSV_SUB_DIR);
+		pathBuilder.append(System.getProperty("file.separator"));
+
+		dataPath = pathBuilder.toString();
 	}
 
 	/**
 	 * Stores a xChart image.
 	 * 
-	 * @param chart
+	 * @param chartchartBuilder
 	 *            chart to store
 	 * @param fileName
 	 *            file name of the image
 	 * @param spotterResult
 	 *            corresponding result object
 	 */
-	public void storeImageChartResource(Chart chart, String fileName,
-			SpotterResult spotterResult) {
+	public void storeImageChartResource(AnalysisChartBuilder chartBuilder, String fileName, SpotterResult spotterResult) {
+		additionalResourceCount++;
 		fileName = fileName.replace("<", "_");
 		fileName = fileName.replace(">", "_");
-		String resourceName = fileName + ".png";
-		String filePath = getAdditionalResourcesPath() + resourceName;
-		try {
-			// using savePNGWithDPI method results in the problem, that the file
-			// is not released (is blocked)
-			BitmapEncoder.savePNG(chart, filePath);
-		} catch (IOException e) {
-			throw new RuntimeException();
+		String resourceName = additionalResourceCount + "-" + fileName;
+
+		if (chartBuilder instanceof XChartBuilder) {
+			resourceName = resourceName + ".png";
+		} else if (chartBuilder instanceof RChartBuilder) {
+			resourceName = resourceName + ".pdf";
 		}
+		String filePath = getAdditionalResourcesPath() + resourceName;
+		chartBuilder.build(filePath);
 		spotterResult.addResourceFile(resourceName);
 	}
 
@@ -195,14 +244,13 @@ public class DetectionResultManager {
 	 * @param inStream
 	 *            input stream representing the text resource
 	 */
-	public void storeTextResource(final String fileName,
-			final SpotterResult spotterResult, final InputStream inStream) {
-
+	public void storeTextResource(final String fileName, final SpotterResult spotterResult, final InputStream inStream) {
+		additionalResourceCount++;
 		Future<?> future = LpeSystemUtils.submitTask(new Runnable() {
 
 			@Override
 			public void run() {
-				String resourceName = fileName + ".txt";
+				String resourceName = additionalResourceCount + "-" + fileName + ".txt";
 				String filePath = getAdditionalResourcesPath() + resourceName;
 				BufferedWriter bWriter = null;
 				BufferedReader bReader = null;
@@ -210,8 +258,7 @@ public class DetectionResultManager {
 
 					FileWriter fWriter = new FileWriter(filePath);
 					bWriter = new BufferedWriter(fWriter);
-					bReader = new BufferedReader(
-							new InputStreamReader(inStream));
+					bReader = new BufferedReader(new InputStreamReader(inStream));
 					String line = bReader.readLine();
 					while (line != null) {
 						bWriter.write(line);
@@ -257,8 +304,7 @@ public class DetectionResultManager {
 	 * @throws MeasurementException
 	 *             thrown if storing raw data fails
 	 */
-	public void storeResults(final Set<Parameter> parameters,
-			final IMeasurementAdapter measurementController)
+	public void storeResults(final Set<Parameter> parameters, final IMeasurementAdapter measurementController)
 			throws MeasurementException {
 		try {
 			resultCount++;
@@ -277,8 +323,7 @@ public class DetectionResultManager {
 				}
 			});
 
-			RecordCSVWriter.getInstance().pipeDataToDatasetFiles(inStream,
-					path, parameters);
+			RecordCSVWriter.getInstance().pipeDataToDatasetFiles(inStream, path, parameters);
 
 			future.get();
 
@@ -296,11 +341,9 @@ public class DetectionResultManager {
 	public DatasetCollection loadData() {
 		File dir = new File(getDataPath());
 		if (!dir.exists()) {
-			throw new RuntimeException(
-					"Failed loading measurement data: Data path does not exist!");
+			throw new RuntimeException("Failed loading measurement data: Data path does not exist!");
 		}
-		return RecordCSVReader.getInstance()
-				.readDatasetCollectionFromDirectory(getDataPath());
+		return RecordCSVReader.getInstance().readDatasetCollectionFromDirectory(getDataPath());
 	}
 
 	/**

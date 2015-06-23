@@ -15,8 +15,6 @@
  */
 package org.spotter.eclipse.ui.model;
 
-import org.spotter.eclipse.ui.handlers.DeleteHandler;
-import org.spotter.eclipse.ui.menu.IDeletable;
 import org.spotter.eclipse.ui.model.xml.IModelWrapper;
 
 /**
@@ -28,32 +26,45 @@ import org.spotter.eclipse.ui.model.xml.IModelWrapper;
  */
 public class BasicEditorExtensionItemFactory implements IExtensionItemFactory {
 
+	private final String editorId;
+
+	/**
+	 * Creates a basic extension item factory for the given editor.
+	 * 
+	 * @param editorId
+	 *            the id of the editor the created extensions will be assigned
+	 *            to
+	 */
+	public BasicEditorExtensionItemFactory(String editorId) {
+		this.editorId = editorId;
+	}
+
 	@Override
 	public IExtensionItem createExtensionItem() {
-		IExtensionItem basicItem = new ExtensionItem();
+		IExtensionItem basicItem = new ExtensionItem(editorId);
 		enhanceExtensionItem(basicItem);
 		return basicItem;
 	}
 
 	@Override
 	public IExtensionItem createExtensionItem(IModelWrapper modelWrapper) {
-		IExtensionItem basicItem = new ExtensionItem(modelWrapper);
+		IExtensionItem basicItem = new ExtensionItem(modelWrapper, editorId);
 		enhanceExtensionItem(basicItem);
 		return basicItem;
 	}
 
 	@Override
 	public IExtensionItem createExtensionItem(IExtensionItem parent, IModelWrapper modelWrapper) {
-		IExtensionItem basicItem = new ExtensionItem(parent, modelWrapper);
+		IExtensionItem basicItem = new ExtensionItem(parent, modelWrapper, editorId);
 		enhanceExtensionItem(basicItem);
 		return basicItem;
 	}
 
 	private void enhanceExtensionItem(IExtensionItem basicItem) {
-		addDeleteHandler(basicItem);
+		//addDeleteHandler(basicItem);
 	}
 
-	private void addDeleteHandler(IExtensionItem basicItem) {
+	/*private void addDeleteHandler(IExtensionItem basicItem) {
 		basicItem.addHandler(DeleteHandler.DELETE_COMMAND_ID, new IDeletable() {
 
 			private static final String ELEMENT_TYPE_NAME = "Extension Item";
@@ -64,11 +75,22 @@ public class BasicEditorExtensionItemFactory implements IExtensionItemFactory {
 			}
 
 			@Override
+			public void delete(Object[] elements) {
+				// TODO: implement delete here
+			}
+
+			@Override
 			public String getElementTypeName() {
 				return ELEMENT_TYPE_NAME;
 			}
 
+			@Override
+			public boolean showConfirmationDialog(Object[] elements) {
+				// TODO: implement confirmation here
+				return false;
+			}
+
 		});
-	}
+	}*/
 
 }

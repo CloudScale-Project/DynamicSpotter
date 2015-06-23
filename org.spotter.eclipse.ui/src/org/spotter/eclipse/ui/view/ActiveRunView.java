@@ -19,8 +19,6 @@ import java.net.ConnectException;
 import java.util.Set;
 
 import org.eclipse.core.resources.IProject;
-import org.eclipse.jface.viewers.ISelectionChangedListener;
-import org.eclipse.jface.viewers.SelectionChangedEvent;
 import org.eclipse.jface.viewers.TreeViewer;
 import org.eclipse.jface.viewers.ViewerCell;
 import org.eclipse.swt.SWT;
@@ -30,8 +28,8 @@ import org.eclipse.swt.events.DisposeListener;
 import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Composite;
-import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.part.ViewPart;
 import org.lpe.common.util.system.LpeSystemUtils;
 import org.slf4j.Logger;
@@ -58,7 +56,7 @@ import org.spotter.shared.status.SpotterProgress;
  * @author Denis Knoepfle
  * 
  */
-public class ActiveRunView extends ViewPart implements ISelectionChangedListener {
+public class ActiveRunView extends ViewPart {
 
 	public static final String VIEW_ID = "org.spotter.eclipse.ui.view.activeRunView";
 
@@ -74,7 +72,6 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 	private boolean isDisposed;
 	private Label label;
 	private TreeViewer treeViewer;
-	private Display display;
 	private long currentViewerInputJobId;
 	private SpotterProgress spotterProgress;
 
@@ -84,16 +81,16 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 
 		@Override
 		public void run() {
-			while (!isDisposed && !display.isDisposed()) {
+			while (!isDisposed) {
 				try {
 					Thread.sleep(SLEEP_TIME_MILLIS);
 				} catch (InterruptedException e) {
-					LOGGER.warn("View Updater was interrupted");
+					LOGGER.warn("ViewUpdater was interrupted");
 				}
 				try {
 					updateView();
 				} catch (SWTException e) {
-					LOGGER.debug("stop view updater as view is already disposed", e);
+					LOGGER.debug("stop view updater as view is already disposed");
 					break;
 				}
 			}
@@ -105,7 +102,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 	 * The constructor.
 	 */
 	public ActiveRunView() {
-		this.extensionItemFactory = new ImmutableExtensionItemFactory();
+		this.extensionItemFactory = new ImmutableExtensionItemFactory(null);
 		this.isDisposed = false;
 		this.spotterProgress = null;
 		this.currentViewerInputJobId = 0;
@@ -138,13 +135,12 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		label.addDisposeListener(disposeListener);
 		treeViewer.getTree().addDisposeListener(disposeListener);
 
-		Activator.getDefault().addProjectSelectionListener(this);
-		this.display = label.getDisplay();
 		LpeSystemUtils.submitTask(new ViewUpdater());
 	}
 
 	private void createTreeViewer(Composite parent) {
-		treeViewer = ExtensionsGroupViewer.createTreeViewer(parent, extensionItemFactory.createExtensionItem());
+		treeViewer = ExtensionsGroupViewer.createTreeViewer(parent, extensionItemFactory.createExtensionItem(), null,
+				false);
 
 		SpotterExtensionsLabelProvider labelProvider = new SpotterExtensionsLabelProvider() {
 			@Override
@@ -188,7 +184,6 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 
 	@Override
 	public void dispose() {
-		Activator.getDefault().removeProjectSelectionListener(this);
 		this.isDisposed = true;
 	}
 
@@ -216,7 +211,8 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 			clear();
 		}
 
-		WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+		Shell shell = getSite() == null ? null : getSite().getShell();
+		WidgetUtils.submitSyncExecIgnoreDisposed(shell, new Runnable() {
 			@Override
 			public void run() {
 				setContentDescription(description);
@@ -240,7 +236,8 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		}
 
 		if (!hasClientConnection || hasConnectionErrorOccured) {
-			WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+			clear();
+			WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 				@Override
 				public void run() {
 					label.setText("No connection to DS service. Try again later.");
@@ -248,7 +245,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 			});
 		} else if (jobId == null) {
 			clear();
-			WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+			WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 				@Override
 				public void run() {
 					label.setText("Currently no running diagnosis.");
@@ -257,7 +254,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		} else {
 			updateDiagnosisData(jobId, client, projectName);
 		}
-		WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+		WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 			@Override
 			public void run() {
 				label.getParent().layout();
@@ -270,8 +267,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 			runExtensionsImageProvider.setSpotterProgress(null);
 			XPerformanceProblem rootProblem = client.getCurrentRootProblem(false);
 			if (rootProblem == null) {
-				LOGGER.warn("Cannot fetch root problem!", client.getLastClientException());
-				WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+				WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 					@Override
 					public void run() {
 						label.setText("Cannot fetch root problem!");
@@ -282,10 +278,11 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 			}
 			final IExtensionItem input = HierarchyEditor.createPerformanceProblemHierarchy(projectName,
 					extensionItemFactory, rootProblem);
-			WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+			WidgetUtils.submitSyncExecIgnoreDisposed(treeViewer.getControl(), new Runnable() {
 				@Override
 				public void run() {
 					treeViewer.setInput(input);
+					treeViewer.expandAll();
 				}
 			});
 			currentViewerInputJobId = jobId;
@@ -294,7 +291,7 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 		spotterProgress = client.getCurrentProgressReport();
 		runExtensionsImageProvider.setSpotterProgress(spotterProgress);
 
-		WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+		WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 			@Override
 			public void run() {
 				label.setText("Diagnosis with job id '" + jobId + "' is in progress!");
@@ -304,11 +301,12 @@ public class ActiveRunView extends ViewPart implements ISelectionChangedListener
 	}
 
 	private void clear() {
-		WidgetUtils.submitSyncExecIgnoreDisposed(display, new Runnable() {
+		WidgetUtils.submitSyncExecIgnoreDisposed(label, new Runnable() {
 			@Override
 			public void run() {
 				label.setText("");
 				treeViewer.setInput(null);
+				currentViewerInputJobId = 0;
 			}
 		});
 	}

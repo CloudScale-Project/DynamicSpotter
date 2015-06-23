@@ -44,6 +44,24 @@ import org.spotter.shared.environment.model.XMConfiguration;
  */
 public class ExtensionItem implements IExtensionItem {
 
+	private class ConnectionUpdater implements Runnable {
+		private volatile boolean isCancelled = false;
+
+		public void cancel() {
+			this.isCancelled = true;
+		}
+
+		@Override
+		public void run() {
+			try {
+				Boolean newConnection = ExtensionItem.this.modelWrapper.testConnection();
+				onConnectionUpdateComplete(this, newConnection, null);
+			} catch (Exception e) {
+				onConnectionUpdateComplete(this, null, e);
+			}
+		}
+	}
+
 	private static final String MSG_CONN_PENDING = "Connection test pending...";
 	private static final String MSG_CONN_AVAILABLE = "Connection OK";
 	private static final String MSG_CONN_UNAVAILABLE = "No connection";
@@ -62,10 +80,12 @@ public class ExtensionItem implements IExtensionItem {
 	private final IModelWrapper modelWrapper;
 	private final Map<String, ConfigParameterDescription> remainingDescriptions;
 
+	private final String editorId;
 	private ServiceClientWrapper client;
 	private long lastCacheClearTime;
 	private Map<String, ConfigParameterDescription> paramsMap;
-	private Boolean connection;
+	private volatile Boolean connection;
+	private volatile ConnectionUpdater connectionUpdater;
 	private boolean ignoreConnection;
 	private boolean isPending;
 	private String extensionDescription;
@@ -73,9 +93,12 @@ public class ExtensionItem implements IExtensionItem {
 
 	/**
 	 * Creates an extension item with no children and no model.
+	 * 
+	 * @param editorId
+	 *            the id of the editor this extension is assigned to
 	 */
-	public ExtensionItem() {
-		this(null, null);
+	public ExtensionItem(String editorId) {
+		this(null, null, editorId);
 	}
 
 	/**
@@ -85,9 +108,11 @@ public class ExtensionItem implements IExtensionItem {
 	 * 
 	 * @param modelWrapper
 	 *            the model wrapper
+	 * @param editorId
+	 *            the id of the editor this extension is assigned to
 	 */
-	public ExtensionItem(IModelWrapper modelWrapper) {
-		this(null, modelWrapper);
+	public ExtensionItem(IModelWrapper modelWrapper, String editorId) {
+		this(null, modelWrapper, editorId);
 	}
 
 	/**
@@ -97,18 +122,21 @@ public class ExtensionItem implements IExtensionItem {
 	 *            the parent of this item
 	 * @param modelWrapper
 	 *            the model wrapper for this item
+	 * @param editorId
+	 *            the id of the editor this extension is assigned to
 	 */
-	public ExtensionItem(IExtensionItem parent, IModelWrapper modelWrapper) {
+	public ExtensionItem(IExtensionItem parent, IModelWrapper modelWrapper, String editorId) {
 		this.itemChangedListeners = new ArrayList<IItemChangedListener>();
 		this.propertiesChangedListeners = new ArrayList<IItemPropertiesChangedListener>();
 		this.handlerMediatorHelper = new HandlerMediatorHelper();
 		this.childrenItems = new ArrayList<IExtensionItem>();
 		this.parentItem = parent;
 
+		this.editorId = editorId;
 		this.client = null;
 		this.lastCacheClearTime = 0;
 		this.modelWrapper = modelWrapper;
-		if (modelWrapper == null) {
+		if (modelWrapper == null || modelWrapper.getXMLModel() == null) {
 			this.remainingDescriptions = new HashMap<String, ConfigParameterDescription>();
 		} else {
 			String projectName = modelWrapper.getProjectName();
@@ -122,19 +150,52 @@ public class ExtensionItem implements IExtensionItem {
 				this.extensionDescription = extDesc.getDefaultValue();
 			}
 		}
-		this.connection = null;
+		setConnection(null);
+		setConnectionUpdater(null);
 		this.ignoreConnection = false;
 		this.isPending = modelWrapper == null ? false : true;
 		this.errorMsg = null;
 	}
 
+	private synchronized Boolean getConnection() {
+		return connection;
+	}
+
+	private synchronized void setConnection(Boolean connection) {
+		this.connection = connection;
+	}
+
+	private synchronized ConnectionUpdater getConnectionUpdater() {
+		return connectionUpdater;
+	}
+
+	private synchronized void setConnectionUpdater(ConnectionUpdater connectionUpdater) {
+		this.connectionUpdater = connectionUpdater;
+	}
+
+	private synchronized void onConnectionUpdateComplete(ConnectionUpdater updater, Boolean newConnection,
+			Exception exception) {
+		if (!updater.isCancelled) {
+			if (exception == null) {
+				setConnection(newConnection);
+			} else {
+				errorMsg = exception.getMessage();
+			}
+			isPending = false;
+			fireItemAppearanceChangedOnUIThread();
+		}
+	}
+
 	@Override
 	public String getText() {
-		if (modelWrapper == null) {
+		if (modelWrapper == null || modelWrapper.getXMLModel() == null) {
 			return "";
 		}
 		String customName = modelWrapper.getName();
 		String extensionName = modelWrapper.getExtensionName();
+		if (extensionName == null) {
+			extensionName = "unnamed extension";
+		}
 		if (customName != null && !customName.isEmpty()) {
 			return customName + " (" + extensionName + ")";
 		} else {
@@ -144,32 +205,45 @@ public class ExtensionItem implements IExtensionItem {
 
 	@Override
 	public String getToolTip() {
-		if (ignoreConnection) {
+		if (isConnectionIgnored()) {
 			return extensionDescription != null ? extensionDescription : "";
 		}
 		if (isPending) {
 			return MSG_CONN_PENDING;
 		}
 		String tooltip = MSG_CONN_INVALID + (errorMsg == null ? "" : ": " + errorMsg);
-		if (connection != null) {
-			tooltip = connection ? MSG_CONN_AVAILABLE : MSG_CONN_UNAVAILABLE;
+		Boolean currentConnection = getConnection();
+		if (currentConnection != null) {
+			tooltip = currentConnection ? MSG_CONN_AVAILABLE : MSG_CONN_UNAVAILABLE;
 		}
 		return tooltip;
 	}
 
 	@Override
 	public Image getImage() {
-		if (ignoreConnection) {
+		if (isConnectionIgnored()) {
 			return null;
 		}
 		if (isPending) {
 			return IMG_CONN_PENDING;
 		}
 		Image image = IMG_CONN_INVALID;
-		if (connection != null) {
-			image = connection ? IMG_CONN_AVAILABLE : IMG_CONN_UNAVAILABLE;
+		Boolean currentConnection = getConnection();
+		if (currentConnection != null) {
+			image = currentConnection ? IMG_CONN_AVAILABLE : IMG_CONN_UNAVAILABLE;
 		}
 		return image;
+	}
+
+	@Override
+	public String getEditorId() {
+		return editorId;
+	}
+
+	@Override
+	public String toString() {
+		String text = getText();
+		return text.isEmpty() ? "ExtensionItem {no model}" : text;
 	}
 
 	@Override
@@ -213,27 +287,22 @@ public class ExtensionItem implements IExtensionItem {
 	}
 
 	@Override
-	public void updateConnectionStatus() {
+	public synchronized void updateConnectionStatus() {
 		if (isConnectionIgnored() || modelWrapper == null) {
 			return;
 		}
+		ConnectionUpdater currentUpdater = getConnectionUpdater();
+		if (currentUpdater != null) {
+			currentUpdater.cancel();
+		}
 		isPending = true;
 		errorMsg = null;
+		setConnection(null);
 
 		fireItemAppearanceChanged();
-		LpeSystemUtils.submitTask(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					connection = null;
-					connection = ExtensionItem.this.modelWrapper.testConnection();
-				} catch (Exception e) {
-					errorMsg = e.getMessage();
-				}
-				isPending = false;
-				fireItemAppearanceChangedOnUIThread();
-			}
-		});
+		currentUpdater = new ConnectionUpdater();
+		setConnectionUpdater(currentUpdater);
+		LpeSystemUtils.submitTask(currentUpdater);
 	}
 
 	@Override
@@ -287,12 +356,35 @@ public class ExtensionItem implements IExtensionItem {
 	}
 
 	@Override
-	public void removed() {
+	public void removed(boolean propagate) {
 		modelWrapper.removed();
-		// when this item is removed all of its children will be gone too
-		for (IExtensionItem child : childrenItems) {
-			child.removed();
+		if (propagate) {
+			for (IExtensionItem child : childrenItems) {
+				child.removed(propagate);
+			}
 		}
+	}
+
+	/**
+	 * Copies this item including its children. Any attached handlers or
+	 * listeners will not be copied.
+	 * 
+	 * @return a copy of this item
+	 */
+	@Override
+	public IExtensionItem copyItem() {
+		ExtensionItem copy = new ExtensionItem(getParent(), getModelWrapper().copy(), getEditorId());
+		copy.setIgnoreConnection(isConnectionIgnored());
+
+		// copy children items as well
+		if (hasItems()) {
+			for (IExtensionItem child : getItems()) {
+				IExtensionItem childCopy = child.copyItem();
+				copy.addItem(childCopy);
+			}
+		}
+
+		return copy;
 	}
 
 	@Override
@@ -307,23 +399,58 @@ public class ExtensionItem implements IExtensionItem {
 
 	@Override
 	public void addItem(IExtensionItem item) {
-		childrenItems.add(item);
-		item.setParent(this);
-		item.setIgnoreConnection(ignoreConnection);
+		doAddItem(item);
 		fireItemChildAdded(this, item);
 	}
 
 	@Override
-	public void removeItem(int index) {
+	public void addItem(int index, IExtensionItem item) {
+		doAddItem(item);
+		if (!moveItem(item, index)) {
+			fireItemChildAdded(this, item);
+		}
+	}
+
+	private void doAddItem(IExtensionItem item) {
+		childrenItems.add(item);
+		item.setParent(this);
+		item.setIgnoreConnection(isConnectionIgnored());
+		if (getModelWrapper() != null) {
+			List<?> modelContainingList = getModelWrapper().getChildren();
+			item.getModelWrapper().setXMLModelContainingList(modelContainingList);
+		}
+		item.getModelWrapper().added();
+	}
+
+	@Override
+	public boolean moveItem(IExtensionItem item, int destinationIndex) {
+		boolean success = false;
+		int index = getItemIndex(item);
+		if (index != -1 && index != destinationIndex && destinationIndex >= 0 && destinationIndex < getItemCount()) {
+			childrenItems.remove(index);
+			if (destinationIndex < getItemCount()) {
+				childrenItems.add(destinationIndex, item);
+			} else {
+				childrenItems.add(item);
+			}
+			item.getModelWrapper().moved(destinationIndex);
+			fireItemChildAdded(this, item);
+			success = true;
+		}
+		return success;
+	}
+
+	@Override
+	public void removeItem(int index, boolean propagate) {
 		IExtensionItem item = childrenItems.remove(index);
-		item.removed();
+		item.removed(propagate);
 		fireItemChildRemoved(this, item);
 	}
 
 	@Override
-	public void removeItem(IExtensionItem item) {
+	public void removeItem(IExtensionItem item, boolean propgate) {
 		childrenItems.remove(item);
-		item.removed();
+		item.removed(propgate);
 		fireItemChildRemoved(this, item);
 	}
 
@@ -350,6 +477,19 @@ public class ExtensionItem implements IExtensionItem {
 	@Override
 	public IExtensionItem getParent() {
 		return parentItem;
+	}
+
+	@Override
+	public boolean hasParent(IExtensionItem parent) {
+		if (getParent() != null) {
+			if (getParent().equals(parent)) {
+				return true;
+			} else {
+				return getParent().hasParent(parent);
+			}
+		}
+
+		return false;
 	}
 
 	@Override

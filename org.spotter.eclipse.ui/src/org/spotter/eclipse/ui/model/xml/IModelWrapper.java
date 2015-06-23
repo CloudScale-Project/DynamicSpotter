@@ -46,6 +46,14 @@ public interface IModelWrapper {
 	String NAME_KEY = ConfigKeys.SATELLITE_ADAPTER_NAME_KEY;
 
 	/**
+	 * Creates a copy of this wrapper including its underlying XML model. Any
+	 * unique keys are replaced by new ones. Children should not be copied.
+	 * 
+	 * @return a copy of this wrapper
+	 */
+	IModelWrapper copy();
+
+	/**
 	 * @return the name of the extension that the model is associated with
 	 */
 	String getExtensionName();
@@ -79,6 +87,19 @@ public interface IModelWrapper {
 	Object getXMLModel();
 
 	/**
+	 * Sets the list of siblings.
+	 * 
+	 * @param modelContainingList
+	 *            the list of siblings to set
+	 */
+	void setXMLModelContainingList(List<?> modelContainingList);
+
+	/**
+	 * @return the children of this model if it has any
+	 */
+	List<?> getChildren();
+
+	/**
 	 * @return the configuration parameter descriptions that belong to the
 	 *         associated extension
 	 */
@@ -97,8 +118,21 @@ public interface IModelWrapper {
 	Boolean testConnection() throws Exception;
 
 	/**
+	 * Must be called when this model is added.
+	 */
+	void added();
+
+	/**
 	 * Must be called when this model is removed.
 	 */
 	void removed();
+
+	/**
+	 * Must be called when this model is moved.
+	 * 
+	 * @param destinationIndex
+	 *            index where this model is moved to
+	 */
+	void moved(int destinationIndex);
 
 }
