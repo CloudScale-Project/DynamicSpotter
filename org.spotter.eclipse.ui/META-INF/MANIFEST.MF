@@ -17,7 +17,8 @@ Bundle-ClassPath: .,
  lib/org.spotter.client.assembly.jar
 Import-Package: org.eclipse.core.resources,
  org.eclipse.ui.editors.text
-Export-Package: org.lpe.common.util,
+Export-Package: org.lpe.common.config,
+ org.lpe.common.util,
  org.slf4j,
  org.spotter.client,
  org.spotter.eclipse.ui,
